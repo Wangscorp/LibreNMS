@@ -14,18 +14,96 @@
 
 ---
 
-> 🟢 **Status:** Ubuntu 24.04 is an **officially supported** LibreNMS platform — no workaround OS needed. This guide follows the [official LibreNMS docs](https://docs.librenms.org/Installation/Install-LibreNMS/) 1:1, with **one intentional deviation: MySQL instead of MariaDB.** Every place that changes because of that is flagged with a 🐬 icon.
+## 🧭 Linux command primer — quick guide to commands used in this document
+
+This guide uses a number of common Linux commands and patterns. If you're new to Linux, here's a short reference for the exact commands used below and what they do.
+
+- apt update && apt upgrade -y
+  - Refresh package lists and upgrade installed packages. `-y` answers "yes" to prompts.
+
+- apt install <package(s)>
+  - Installs one or more packages from the configured repositories (e.g., `apt install nginx`).
+
+- curl, wget
+  - Download files from the network. `curl -O <url>` or the `-sSLo` form used in this doc saves to a path.
+
+- dpkg -i <file.deb>
+  - Installs a local .deb package file (used here to install a keyring package).
+
+- echo "..." > /path/to/file
+  - Writes text into a file, replacing its contents. Use `>>` to append instead.
+
+- git clone <repo-url>
+  - Downloads a Git repository to the current directory.
+
+- cd /path
+  - Change the current working directory.
+
+- useradd <username> [flags]
+  - Create a system user. Flags like `-d` (home dir), `-r` (system account), and `-s` (shell) are used here.
+
+- chown -R user:group /path
+  - Change owner and group of files; `-R` applies recursively.
+
+- chmod 771 /path
+  - Change file/directory permissions. Numeric modes like `771` are explained in-line in the doc.
+
+- setfacl -m / -d -m
+  - Modify POSIX ACLs (access control lists) to grant more granular permissions than chmod can.
+
+- su - <user> / exit
+  - Switch to another user account (`su - librenms`) and `exit` returns to the previous user. Use `sudo -i -u <user>` as an alternative.
+
+- systemctl enable|start|restart <service>
+  - Manage systemd services. `enable` makes a service start at boot, `start` runs it now, `restart` reloads config and restarts it.
+
+- mysql -u root
+  - Opens an interactive MySQL shell as the `root` database user. SQL commands are run at the `mysql>` prompt.
+
+- vi /etc/whatever or editor of your choice
+  - Edit configuration files. You can use `nano`, `vi`, or any editor you prefer.
+
+- ln -s /source /target
+  - Create a symbolic link. Used to make commands available system-wide.
+
+- cp /source /destination
+  - Copy files. Used to install default configs into /etc or /opt paths.
+
+- rm /etc/nginx/sites-enabled/default
+  - Remove files. Use carefully; `rm -rf` removes recursively and forcibly.
+
+- chmod +x /path/to/script
+  - Make a file executable so you can run `./script`.
+
+- ./script or /usr/bin/command
+  - Execute a script in the current directory (`./script`) or a command installed in a system path.
+
+- ufw allow <port>/tcp
+  - Open a firewall port using Ubuntu's uncomplicated firewall. Only needed if `ufw` is enabled.
+
+- cp /opt/librenms/dist/librenms.cron /etc/cron.d/librenms
+  - Installing a file into `/etc/cron.d/` registers scheduled jobs with cron.
+
+Notes & safety tips
+
+- Many commands in this doc require root privileges. The guide suggests running as root or prefixing commands with `sudo`.
+- When copying commands from the web: inspect them before running — especially commands that write to system paths (`/etc`, `/usr/bin`) or that remove files.
+- When editing files like MySQL's config or PHP's php.ini, keep a backup (e.g., `cp /etc/mysql/mysql.conf.d/mysqld.cnf /etc/mysql/mysql.conf.d/mysqld.cnf.bak`) before making changes.
+
+---
+
+> 🟢 **Status:** Ubuntu 24.04 is an **officially supported** LibreNMS platform — no workaround OS needed. This guide follows the [official LibreNMS docs](https://docs.librenms.org/Installation/Install-LibreNMS/)
 
 ## 📑 Table of Contents
 
-| | | |
-|---|---|---|
-| [🧰 What you'll end up with](#-what-youll-end-up-with) | [1️⃣ Update & add PHP repo](#1️⃣-update-the-server-and-add-the-php-repository) | [2️⃣ Install packages](#2️⃣-install-all-required-packages) |
+| | | | |
+|---|---|---|---|
+| [🧰 What you'll end up with](#-what-youll-end-up-with) | [1️⃣ Update & add PHP repo](#1️⃣-update-the-server-and-add-the-php-repository) | [2️⃣ Install packages](#2️⃣-install-al[...]
 | [3️⃣ Create system user](#3️⃣-create-the-librenms-system-user) | [4️⃣ Download LibreNMS](#4️⃣-download-librenms) | [5️⃣ File permissions](#5️⃣-set-file-permissions) |
 | [6️⃣ Composer](#6️⃣-install-php-dependencies-via-composer) | [7️⃣ Timezone](#7️⃣-set-the-timezone) | [8️⃣ 🐬 MySQL config](#8️⃣--configure-mysql) |
 | [9️⃣ PHP-FPM](#9️⃣-configure-php-fpm) | [🔟 nginx](#-configure-nginx) | [1️⃣1️⃣ Firewall](#1️⃣1️⃣-allow-access-through-the-firewall) |
-| [1️⃣2️⃣ CLI tool](#1️⃣2️⃣-enable-lnms-command-line-completion) | [1️⃣3️⃣ SNMP](#1️⃣3️⃣-configure-snmpd) | [1️⃣4️⃣ Cron](#1️⃣4️⃣-set-up-the-cron-job) |
-| [1️⃣5️⃣ Scheduler](#1️⃣5️⃣-enable-the-polling-scheduler) | [1️⃣6️⃣ Log rotation](#1️⃣6️⃣-enable-log-rotation) | [1️⃣7️⃣ Web installer](#1️⃣7️⃣-run-the-web-installer) |
+| [1️⃣2️⃣ CLI tool](#1️⃣2️⃣-enable-lnms-command-line-completion) | [1️⃣3️⃣ SNMP](#1️⃣3️⃣-configure-snmpd) | [1️⃣4️⃣ Cron](#1️⃣4️⃣-set-up-the-cron-jo[...]
+| [1️⃣5️⃣ Scheduler](#1️⃣5️⃣-enable-the-polling-scheduler) | [1️⃣6️⃣ Log rotation](#1️⃣6️⃣-enable-log-rotation) | [1️⃣7️⃣ Web installer](#1️⃣7️⃣-run[...]
 | [1️⃣8️⃣ ✅ Final steps](#1️⃣8️⃣-final-steps) | [🆘 Troubleshooting](#-troubleshooting) | [📚 Next reads](#-good-next-reads) |
 
 ---
@@ -40,7 +118,7 @@ A working LibreNMS install on Ubuntu 24.04 (`noble`), serving over **nginx + PHP
 
 ## 1️⃣ Update the Server and Add the PHP Repository
 
-Ubuntu 24.04's own repos ship **PHP 8.3**, but LibreNMS needs **PHP 8.4+** (8.5 recommended) — so even on the *officially supported* OS version, the [official docs](https://docs.librenms.org/Installation/Install-LibreNMS/) still add the **Sury PHP repository** first. We do the same here.
+Ubuntu 24.04's own repos ship **PHP 8.3**, but LibreNMS needs **PHP 8.4+** (8.5 recommended) — so even on the *officially supported* OS version, the [official docs](https://docs.librenms.org/Ins[...]
 
 ```bash
 apt update && apt upgrade -y
@@ -87,7 +165,7 @@ rrdtool snmp snmpd traceroute unzip whois
 | `curl` | Downloading files from within scripts |
 | `fping` | Fast ping utility LibreNMS uses to check if devices are alive |
 | `git` | Clones the LibreNMS source code from GitHub |
-| 🐬 `mysql-server` / `mysql-client` | The database engine + CLI tool. *(Official docs use `mariadb-server`/`mariadb-client` here — this is the MySQL swap, straight from Ubuntu's default repos, no extra repo needed.)* |
+| 🐬 `mysql-server` / `mysql-client` | The database engine + CLI tool. *(Official docs use `mariadb-server`/`mariadb-client` here — this is the MySQL swap, straight from Ubuntu's default repos[...]
 | `mtr-tiny` | Traceroute/ping combo tool for network path diagnostics |
 | `nginx-full` | The web server serving the LibreNMS UI |
 | `nmap` | Network scanning, used by some discovery features |
@@ -156,7 +234,7 @@ chmod 771 /opt/librenms
 setfacl -d -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
 setfacl -R -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
 ```
-🔹 Sets ACLs on the folders the web server needs to write into (graphs, logs, cache, storage). `-d` ("default") makes **new** files inherit group read/write/execute; `-R` applies it to everything that **already exists**.
+🔹 Sets ACLs on the folders the web server needs to write into (graphs, logs, cache, storage). `-d` ("default") makes **new** files inherit group read/write/execute; `-R` applies it to everythi[...]
 
 ---
 
@@ -217,8 +295,8 @@ lower_case_table_names=0
 
 > 💡 **Good to know:**
 > - `innodb_file_per_table=1` gives each table its own file on disk (easier space management). **MySQL 5.6+ already defaults to this** — you're just making it explicit.
-> - `lower_case_table_names=0` keeps table names case-sensitive, which LibreNMS's schema expects. **On Linux, MySQL already defaults to `0`** too — Windows/macOS installs are the ones that default differently.
-> - ⚠️ **MySQL-specific gotcha:** `lower_case_table_names` can only be set **before** the data directory is first initialized — MySQL refuses to change it afterward on a system with existing data. Since `apt install mysql-server` auto-initializes the data directory, and the value you're setting already matches the Linux default, there's no conflict here — but if you ever need to actually *change* this value later, it means wiping and reinitializing the data directory, not just editing the config.
+> - `lower_case_table_names=0` keeps table names case-sensitive, which LibreNMS's schema expects. **On Linux, MySQL already defaults to `0`** too — Windows/macOS installs are the ones that defa[...]
+> - ⚠️ **MySQL-specific gotcha:** `lower_case_table_names` can only be set **before** the data directory is first initialized — MySQL refuses to change it afterward on a system with existin[...]
 
 ```bash
 systemctl enable mysql
@@ -381,7 +459,7 @@ Visit:
 ```
 http://librenms.example.com/install
 ```
-Follow the wizard — it checks requirements, connects to your `librenms` MySQL database from Step 8, and creates your admin account. **The DB step is identical for MySQL or MariaDB** — same host/name/user/password fields.
+Follow the wizard — it checks requirements, connects to your `librenms` MySQL database from Step 8, and creates your admin account. **The DB step is identical for MySQL or MariaDB** — same ho[...]
 
 Save the generated config into `/opt/librenms/config.php`, then:
 ```bash
